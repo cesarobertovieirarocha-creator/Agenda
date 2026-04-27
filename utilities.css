@@ -1,0 +1,39 @@
+.u-text-center {
+    text-align: center !important;
+}
+
+.u-text-muted {
+    color: var(--text-muted) !important;
+    font-weight: 400;
+}
+
+.u-text-accent {
+    color: var(--accent) !important;
+}
+
+.u-flex {
+    display: flex !important;
+}
+
+.u-flex-center {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+}
+
+.u-hidden {
+    display: none !important;
+}
+
+/* Role-based Visibility (Helper) */
+.role-viewer .u-hide-viewer {
+    display: none !important;
+}
+
+.role-user .u-hide-user {
+    display: none !important;
+}
+
+.role-admin .u-hide-admin {
+    display: none !important;
+}
