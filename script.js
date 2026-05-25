@@ -65,6 +65,14 @@ let currentUserDivision = ''; // Armazena a divisão do usuário logado
 let currentUserRole = '';     // Armazena o perfil (VIEWER, USER, ADMIN)
 let currentUsername = '';     // Armazena o username logado
 
+// Gerador de IDs únicos de alta entropia (suporta UUID nativo)
+function generateUUID(prefix = '') {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+        return prefix + crypto.randomUUID();
+    }
+    return prefix + Date.now() + Math.random().toString(36).substr(2, 9);
+}
+
 /**
  * @typedef {Object} Event
  * @property {string} id
@@ -129,7 +137,7 @@ const Permissions = {
 // --- ENTIDADES DE DOMÍNIO (Domain Entities) ---
 const Domain = {
     createEvent: (data) => {
-        const id = data.id || `evt_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        const id = data.id || generateUUID('evt_');
         return {
             id,
             title: String(data.title || 'Nova Tarefa'),
@@ -147,7 +155,17 @@ const Domain = {
             createdBy: String(data.createdBy || currentUsername || 'system'),
             description: String(data.description || ''),
             time: data.time || '',
-            endTime: data.endTime || ''
+            endTime: data.endTime || '',
+            // Preservar dados de recorrência
+            seriesId: data.seriesId || null,
+            recurrenceType: data.recurrenceType || null,
+            recurrenceEnd: data.recurrenceEnd || null,
+            // Preservar dados de anexos
+            attachment: data.attachment || null,
+            attachmentName: data.attachmentName || null,
+            // Preservar dados de lembretes
+            reminder: !!data.reminder,
+            reminderTime: data.reminderTime || ''
         };
     },
     validateRelationship: (event, allUsers) => {
@@ -300,7 +318,12 @@ const AppStore = {
         if (!AppStore.state.eventsData[monthKey]) AppStore.state.eventsData[monthKey] = [];
         AppStore.state.eventsData[monthKey].push(validated);
         await AppStore.persist();
-        logAudit('CREATE_EVENT', `Usuário ${currentUsername} criou tarefa ${validated.id}`);
+        logAudit('CREATE_EVENT', validated.id, validated.title, validated.industry, validated.matrix);
+
+        // Se for recorrente, processa para criar as 3 ativas
+        if (validated.seriesId) {
+            processRecurrences();
+        }
         return true;
     },
 
@@ -381,43 +404,92 @@ const AppStore = {
         await AppStore.persist();
 
         // Log específico
-        if (isJustCompleting) logAudit('COMPLETE_EVENT', `Usuário ${currentUsername} alterou status da tarefa ${eventId}`);
-        else if (isJustDragging) logAudit('MOVE_EVENT', `Usuário ${currentUsername} moveu tarefa ${eventId}`);
-        else logAudit('UPDATE_EVENT', `Usuário ${currentUsername} atualizou tarefa ${eventId}`);
+        if (isJustCompleting) logAudit('COMPLETE_EVENT', updated.id, updated.title, updated.industry, updated.matrix);
+        else if (isJustDragging) logAudit('MOVE_EVENT', updated.id, updated.title, updated.industry, updated.matrix);
+        else logAudit('UPDATE_EVENT', updated.id, updated.title, updated.industry, updated.matrix);
 
         return true;
     },
 
     deleteEvent: (monthKey, eventId) => {
         const monthEvents = AppStore.state.eventsData[monthKey] || [];
-        const existing = monthEvents.find(e => e.id === eventId);
+        const idx = monthEvents.findIndex(e => e.id === eventId);
+        if (idx === -1) return false;
+
+        const existing = monthEvents[idx];
         if (!existing || !Permissions.can('delete', currentUserRole, currentUsername, existing)) return false;
 
-        AppStore.state.eventsData[monthKey] = monthEvents.filter(e => e.id !== eventId);
+        AppStore.state.eventsData[monthKey][idx] = {
+            ...existing,
+            status: 'deleted',
+            version: existing.version + 1,
+            updatedAt: new Date().toISOString()
+        };
         AppStore.persist();
-        logAudit('DELETE_EVENT', `Usuário ${currentUsername} excluiu permanentemente a tarefa ${eventId}`);
+        logAudit('DELETE_EVENT', existing.id, existing.title, existing.industry, existing.matrix);
+
+        if (existing.seriesId) processRecurrences();
         return true;
     },
 
     archiveEvent: (monthKey, eventId) => {
-        return AppStore.updateEvent(monthKey, eventId, { status: 'archived' });
+        const monthEvents = AppStore.state.eventsData[monthKey] || [];
+        const event = monthEvents.find(e => e.id === eventId);
+        const success = AppStore.updateEvent(monthKey, eventId, { status: 'archived' });
+        if (success && event && event.seriesId) {
+            processRecurrences();
+        }
+        return success;
     },
 
-    persist: async () => {
-        try {
-            // Estado de "Salvando" na UI (se existir)
-            const syncBtn = document.getElementById('syncBtn');
-            if (syncBtn) syncBtn.classList.add('is-syncing');
-
-            await PersistenceProvider.saveEvents(AppStore.state.eventsData);
-
-            if (syncBtn) syncBtn.classList.remove('is-syncing');
-            // Invalidar cache após mutação confirmada
-            AppStore.state.lastHash = null;
-        } catch (err) {
-            console.error("Erro na persistência:", err);
-            showToast("Falha ao salvar dados no armazenamento local.", "error");
+    deleteEntireSeries: async (seriesId) => {
+        if (!seriesId) return 0;
+        let deletedCount = 0;
+        const allEvents = AppStore.state.eventsData;
+        Object.keys(allEvents).forEach(monthKey => {
+            allEvents[monthKey] = allEvents[monthKey].map(event => {
+                if (event.seriesId === seriesId && event.status !== 'deleted') {
+                    const allowed = (currentUserRole === 'ADMIN' || (currentUserRole === 'USER' && event.createdBy === currentUsername));
+                    if (allowed) {
+                        deletedCount++;
+                        return {
+                            ...event,
+                            status: 'deleted',
+                            version: event.version + 1,
+                            updatedAt: new Date().toISOString()
+                        };
+                    }
+                }
+                return event;
+            });
+        });
+        if (deletedCount > 0) {
+            await AppStore.persist();
         }
+        return deletedCount;
+    },
+
+    saveTimeout: null,
+    persist: async () => {
+        if (AppStore.saveTimeout) clearTimeout(AppStore.saveTimeout);
+        return new Promise((resolve) => {
+            AppStore.saveTimeout = setTimeout(async () => {
+                try {
+                    const syncBtn = document.getElementById('syncBtn');
+                    if (syncBtn) syncBtn.classList.add('is-syncing');
+
+                    await PersistenceProvider.saveEvents(AppStore.state.eventsData);
+
+                    if (syncBtn) syncBtn.classList.remove('is-syncing');
+                    AppStore.state.lastHash = null;
+                    resolve(true);
+                } catch (err) {
+                    console.error("Erro na persistência:", err);
+                    showToast("Falha ao salvar dados no armazenamento local.", "error");
+                    resolve(false);
+                }
+            }, 300);
+        });
     }
 };
 
@@ -493,6 +565,10 @@ function addAuditLog(action, taskId, taskTitle, industry, matrix) {
     };
     logs.push(newLog);
     PersistenceProvider.saveAuditLogs(logs);
+}
+
+function logAudit(action, taskId, taskTitle, industry, matrix) {
+    addAuditLog(action, taskId, taskTitle, industry, matrix);
 }
 
 
@@ -763,6 +839,13 @@ function openModal(day, month, year) {
     // Atualiza as opções de indústria com base na divisão
     updateIndustryOptions();
     populateAssignedToSelect();
+
+    if (currentUserRole === 'ADMIN' && viewingUser !== 'all') {
+        const assignedSelect = document.getElementById('eventAssignedTo');
+        if (assignedSelect) {
+            assignedSelect.value = viewingUser;
+        }
+    }
 
     document.getElementById('eventTitle').focus();
 }
@@ -1042,7 +1125,7 @@ function openDayDetails(day, month, year) {
                 }
                 return true;
             } else if (currentUserRole === 'USER') {
-                return event.createdBy === currentUsername || event.assignedTo === currentUsername;
+                return event.createdBy === currentUsername || event.assignedTo === currentUsername || event.visibility === 'public';
             } else {
                 return event.visibility === 'public';
             }
@@ -1169,14 +1252,18 @@ function openEventDetail(event, fullKey) {
 
     // Controle de botões baseado em permissão
     const toggleBtn = document.getElementById('toggleCompleteDetailBtn');
+    const completeWrapper = document.getElementById('completeWrapper');
+    const completeLabel = document.getElementById('completeLabel');
     if (toggleBtn) {
-        toggleBtn.style.display = canEdit(event) ? 'block' : 'none';
+        if (completeWrapper) completeWrapper.style.display = canEdit(event) ? 'flex' : 'none';
+        toggleBtn.classList.remove('is-completed', 'is-reopening');
         if (event.completed) {
-            toggleBtn.textContent = 'Reabrir Tarefa';
-            toggleBtn.style.background = '#f59e0b';
+            toggleBtn.classList.add('is-completed', 'is-reopening');
+            if (completeLabel) completeLabel.textContent = 'Reabrir Tarefa';
+            toggleBtn.title = 'Reabrir Tarefa';
         } else {
-            toggleBtn.textContent = 'Marcar como Concluída';
-            toggleBtn.style.background = '#10b981';
+            if (completeLabel) completeLabel.textContent = 'Marcar como Concluída';
+            toggleBtn.title = 'Marcar como Concluída';
         }
         toggleBtn.onclick = () => {
             toggleEventCompletion(fullKey, event.id);
@@ -1186,7 +1273,7 @@ function openEventDetail(event, fullKey) {
 
     if (deleteBtn) {
         if (currentUserRole === 'ADMIN') {
-            deleteBtn.textContent = event.archived ? 'Excluir Permanente' : 'Excluir/Arquivar';
+            deleteBtn.textContent = event.status === 'archived' ? 'Excluir Permanente' : 'Excluir/Arquivar';
             deleteBtn.style.display = 'block';
         } else {
             deleteBtn.textContent = 'Arquivar Tarefa';
@@ -1197,6 +1284,40 @@ function openEventDetail(event, fullKey) {
             deleteEventFromSummary(fullKey, event.id);
             closeEventDetail();
         };
+    }
+
+    // Exibir e Configurar o Botão de Cancelar Recorrência
+    const recurrenceInfo = document.getElementById('recurrenceInfo');
+    const cancelRecurrenceBtn = document.getElementById('cancelRecurrenceBtn');
+
+    if (recurrenceInfo && cancelRecurrenceBtn) {
+        const hasSeries = !!event.seriesId;
+        const allowed = hasSeries && (currentUserRole === 'ADMIN' || (currentUserRole === 'USER' && event.createdBy === currentUsername));
+
+        if (allowed) {
+            recurrenceInfo.style.display = 'block';
+            cancelRecurrenceBtn.onclick = () => {
+                customConfirm(
+                    `Deseja realmente cancelar toda a série recorrente desta tarefa? Todas as repetições desta série serão apagadas.`,
+                    async () => {
+                        try {
+                            const count = await AppStore.deleteEntireSeries(event.seriesId);
+                            logAudit('DELETE_SERIES', event.id, event.title, event.industry, event.matrix);
+                            showToast(`${count} tarefas recorrentes canceladas.`);
+                            closeEventDetail();
+                            generateCalendar(currentDate);
+                        } catch (e) {
+                            console.error(e);
+                            showToast("Erro ao cancelar recorrência.", "error");
+                        }
+                    },
+                    "Sim, Excluir Série",
+                    "Cancelar"
+                );
+            };
+        } else {
+            recurrenceInfo.style.display = 'none';
+        }
     }
 
     // Exibir Observações
@@ -1263,7 +1384,7 @@ function closeEventDetail() {
     document.getElementById('eventDetailModal').style.display = 'none';
 }
 
-window.onclick = function (event) {
+window.addEventListener('click', function (event) {
     const eventModal = document.getElementById('eventModal');
     const summaryModal = document.getElementById('summaryModal');
     const confirmModal = document.getElementById('confirmModal');
@@ -1277,7 +1398,7 @@ window.onclick = function (event) {
     if (event.target == dayDetailsModal) closeDayDetails();
     if (event.target == eventDetailModal) closeEventDetail();
     if (event.target == passwordResetModal) closePasswordReset();
-}
+});
 
 document.getElementById('eventForm').onsubmit = async function (e) {
     e.preventDefault();
@@ -1324,9 +1445,9 @@ document.getElementById('eventForm').onsubmit = async function (e) {
         const isRecurring = document.getElementById('eventRecurrenceCheck')?.checked;
         const recurrenceType = document.getElementById('eventRecurrenceType')?.value;
         const recurrenceEnd = document.getElementById('eventRecurrenceEnd')?.value;
-        const seriesId = isRecurring ? 'series_' + Date.now() + Math.random().toString(36).substr(2, 9) : null;
+        const seriesId = isRecurring ? generateUUID('series_') : null;
 
-        let instancesToCreate = isRecurring && recurrenceEnd ? 3 : 1;
+        let instancesToCreate = isRecurring ? 3 : 1;
         let currentDateObj = new Date(year, month - 1, day);
         const endRecurrenceDateObj = recurrenceEnd ? new Date(recurrenceEnd + 'T00:00:00') : null;
 
@@ -1342,7 +1463,7 @@ document.getElementById('eventForm').onsubmit = async function (e) {
             const curFullKey = `${curYear}-${String(curMonth).padStart(2, '0')}`;
 
             const eventData = {
-                id: Date.now() + Math.random().toString(36).substr(2, 9) + i,
+                id: generateUUID(),
                 day: curDay,
                 industry,
                 matrix,
@@ -1379,7 +1500,17 @@ document.getElementById('eventForm').onsubmit = async function (e) {
             if (isRecurring) {
                 if (recurrenceType === 'daily') currentDateObj.setDate(currentDateObj.getDate() + 1);
                 else if (recurrenceType === 'weekly') currentDateObj.setDate(currentDateObj.getDate() + 7);
-                else if (recurrenceType === 'monthly') currentDateObj.setMonth(currentDateObj.getMonth() + 1);
+                else if (recurrenceType === 'monthly') {
+                    const originalDay = currentDateObj.getDate();
+                    currentDateObj.setDate(1);
+                    currentDateObj.setMonth(currentDateObj.getMonth() + 1);
+                    const lastDay = new Date(
+                        currentDateObj.getFullYear(),
+                        currentDateObj.getMonth() + 1,
+                        0
+                    ).getDate();
+                    currentDateObj.setDate(Math.min(originalDay, lastDay));
+                }
             }
         }
 
@@ -1590,7 +1721,16 @@ function showMainContent(username, division, role, initialViewingUser) {
         const userData = users[division] ? users[division][username] : null;
         const displayName = getUserDisplayName(username);
         const userSpan = document.getElementById('loggedUser');
-        if (userSpan) userSpan.textContent = `${displayName} (${role})`;
+        if (userSpan) {
+            if (role === 'VIEWER') {
+                userSpan.textContent = `Visualizador (Vendo: ${displayName})`;
+            } else {
+                let displayRole = role;
+                if (role === 'ADMIN') displayRole = 'Administrador';
+                else if (role === 'USER') displayRole = 'Colaborador';
+                userSpan.textContent = `${displayName} (${displayRole})`;
+            }
+        }
 
         const avatarImg = document.getElementById('userAvatar');
         if (avatarImg && userData && userData.avatar) {
@@ -1643,8 +1783,9 @@ if (loginForm) {
             }
 
             const customPasswords = JSON.parse(localStorage.getItem('eisenhowerPasswords')) || {};
-            const isCustomPass = customPasswords[division] && customPasswords[division][user] === pass;
-            const isDefaultPass = users[division] && users[division][user] && users[division][user].pass === pass;
+            const hasCustomPass = customPasswords[division] && customPasswords[division].hasOwnProperty(user);
+            const isCustomPass = hasCustomPass && customPasswords[division][user] === pass;
+            const isDefaultPass = !hasCustomPass && users[division] && users[division][user] && users[division][user].pass === pass;
 
             if (isCustomPass || isDefaultPass) {
                 // Validar se é um administrador permitido
@@ -1803,128 +1944,40 @@ function requestNotificationPermission() {
     }
 }
 
+let reminderRunning = false;
 function checkReminders() {
+    if (reminderRunning) return;
     if (!('Notification' in window) || Notification.permission !== 'granted') return;
-    const now = new Date();
-    const today = now.toISOString().slice(0, 10);
-    const currentTime = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
-    const fullKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-    const todayEvents = (AppStore.getEvents()[fullKey] || []).filter(e => e.day === now.getDate());
+    reminderRunning = true;
+    try {
+        const now = new Date();
+        const today = now.toISOString().slice(0, 10);
+        const currentTime = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
+        const fullKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+        const todayEvents = (AppStore.getEvents()[fullKey] || []).filter(e => e.day === now.getDate());
 
-    todayEvents.forEach(event => {
-        if (event.reminder && event.reminderTime === currentTime) {
-            const notifKey = `notified_${event.id}_${today}_${currentTime}`;
-            if (!sessionStorage.getItem(notifKey)) {
-                new Notification('🔔 Lembrete - Agenda de Funções', {
-                    body: `${event.title}\n${brandNames[event.industry] || 'Tarefa'}`,
-                    icon: brandLogos[event.industry] || 'Imagens/Sigma.png'
-                });
-                sessionStorage.setItem(notifKey, '1');
+        todayEvents.forEach(event => {
+            if (event.reminder && event.reminderTime === currentTime) {
+                const notifKey = `notified_${event.id}_${today}_${currentTime}`;
+                if (!sessionStorage.getItem(notifKey)) {
+                    new Notification('🔔 Lembrete - Agenda de Funções', {
+                        body: `${event.title}\n${brandNames[event.industry] || 'Tarefa'}`,
+                        icon: brandLogos[event.industry] || 'Imagens/Sigma.png'
+                    });
+                    sessionStorage.setItem(notifKey, '1');
+                }
             }
-        }
-    });
+        });
+    } finally {
+        reminderRunning = false;
+    }
 }
 
 setInterval(checkReminders, 60000);
 
 // ========================================
-// 3. EXPORTAR PDF / EXCEL
+// 3. EXPORTAR PDF / EXCEL (Implementações completas movidas para o final do arquivo)
 // ========================================
-function toggleExportDropdown() {
-    const dd = document.getElementById('exportDropdown');
-    dd.classList.toggle('show');
-}
-
-document.addEventListener('click', (e) => {
-    const wrapper = document.querySelector('.export-wrapper');
-    const dd = document.getElementById('exportDropdown');
-    if (wrapper && dd && !wrapper.contains(e.target)) {
-        dd.classList.remove('show');
-    }
-});
-
-function getFilteredEventsForExport() {
-    // BLOQUEIO ABSOLUTO PARA VIEWER (Segurança Real)
-    if (!Permissions.can('export', currentUserRole, currentUsername)) {
-        showToast("Você não tem permissão para exportar dados.", "error");
-        return [];
-    }
-
-    const filterIndustry = document.getElementById('filterIndustry')?.value || 'all';
-    const filterMatrix = document.getElementById('filterMatrix')?.value || 'all';
-    const filterStatus = document.getElementById('filterStatus')?.value || 'all';
-
-    const yearKey = currentDate.getFullYear();
-    const monthKey = String(currentDate.getMonth() + 1).padStart(2, '0');
-    const fullKey = `${yearKey}-${monthKey}`;
-
-    let events = getActiveEvents(eventsData[fullKey] || []);
-    events = getVisibleEvents(events, currentUsername, currentUserRole);
-
-    return events.filter(event => {
-        const matchesIndustry = filterIndustry === 'all' || event.industry === filterIndustry;
-        const matchesMatrix = filterMatrix === 'all' || event.matrix === filterMatrix;
-        const matchesSearch = !searchQuery || event.title.toLowerCase().includes(searchQuery);
-
-        let matchesStatus = true;
-        if (filterStatus === 'pending') matchesStatus = !event.completed;
-        else if (filterStatus === 'completed') matchesStatus = event.completed;
-        else if (filterStatus === 'archived') matchesStatus = event.status === 'archived';
-
-        return matchesIndustry && matchesMatrix && matchesSearch && matchesStatus;
-    }).sort((a, b) => a.day - b.day);
-}
-
-
-function getMatrixName(m) {
-    return { 'do': 'Fazer Agora', 'schedule': 'Agendar', 'delegate': 'Delegar', 'eliminate': 'Eliminar' }[m] || m;
-}
-
-function exportPDF() {
-    document.getElementById('exportDropdown').classList.remove('show');
-    const { jsPDF } = window.jspdf;
-    const doc = new jsPDF();
-    const events = getFilteredEventsForExport();
-    const monthName = currentDate.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
-
-    doc.setFontSize(18);
-    doc.text(`Agenda de Funções - ${monthName.charAt(0).toUpperCase() + monthName.slice(1)}`, 14, 22);
-    doc.setFontSize(10);
-    doc.text(`Exportado em: ${new Date().toLocaleString('pt-BR')}`, 14, 30);
-
-    const rows = events.map(e => [
-        e.day, e.title, brandNames[e.industry] || '', getMatrixName(e.matrix)
-    ]);
-
-    doc.autoTable({
-        startY: 36,
-        head: [['Dia', 'Título', 'Indústria', 'Prioridade']],
-        body: rows,
-        theme: 'grid',
-        headStyles: { fillColor: [79, 70, 229] },
-        styles: { font: 'helvetica', fontSize: 10 }
-    });
-
-    doc.save(`agenda_${currentDate.getFullYear()}_${String(currentDate.getMonth() + 1).padStart(2, '0')}.pdf`);
-}
-
-function exportExcel() {
-    document.getElementById('exportDropdown').classList.remove('show');
-    const events = getFilteredEventsForExport();
-    const monthName = currentDate.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
-
-    const data = events.map(e => ({
-        'Dia': e.day,
-        'Título': e.title,
-        'Indústria': brandNames[e.industry] || '',
-        'Prioridade': getMatrixName(e.matrix)
-    }));
-
-    const ws = XLSX.utils.json_to_sheet(data);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, monthName.charAt(0).toUpperCase() + monthName.slice(1));
-    XLSX.writeFile(wb, `agenda_${currentDate.getFullYear()}_${String(currentDate.getMonth() + 1).padStart(2, '0')}.xlsx`);
-}
 
 // ========================================
 // 4. TEMA CLARO / ESCURO
@@ -1935,15 +1988,21 @@ function toggleTheme() {
     const next = current === 'light' ? 'dark' : 'light';
     html.setAttribute('data-theme', next);
     localStorage.setItem('eisenhowerTheme', next);
+    const icon = next === 'light' ? '☀️' : '🌙';
     const btn = document.getElementById('themeToggleInline');
-    if (btn) btn.textContent = next === 'light' ? '☀️' : '🌙';
+    if (btn) btn.textContent = icon;
+    const loginBtn = document.getElementById('loginThemeBtn');
+    if (loginBtn) loginBtn.textContent = icon;
 }
 
 function loadTheme() {
     const saved = localStorage.getItem('eisenhowerTheme') || 'dark';
     document.documentElement.setAttribute('data-theme', saved);
+    const icon = saved === 'light' ? '☀️' : '🌙';
     const btn = document.getElementById('themeToggleInline');
-    if (btn) btn.textContent = saved === 'light' ? '☀️' : '🌙';
+    if (btn) btn.textContent = icon;
+    const loginBtn = document.getElementById('loginThemeBtn');
+    if (loginBtn) loginBtn.textContent = icon;
 }
 
 loadTheme();
@@ -2106,8 +2165,13 @@ async function syncWithSheets() {
                     if (localIdx === -1) {
                         newMergedData[monthKey].push(cloudEv);
                     } else {
-                        // Se houver conflito, mantém a versão com mais metadados ou a da nuvem
-                        newMergedData[monthKey][localIdx] = { ...newMergedData[monthKey][localIdx], ...cloudEv };
+                        // Resolução de Conflitos baseada em Versão (impede que tarefas apagadas localmente ressurjam)
+                        const localEv = newMergedData[monthKey][localIdx];
+                        if ((localEv.version || 1) >= (cloudEv.version || 1)) {
+                            newMergedData[monthKey][localIdx] = { ...cloudEv, ...localEv };
+                        } else {
+                            newMergedData[monthKey][localIdx] = { ...localEv, ...cloudEv };
+                        }
                     }
                 });
             }
@@ -2282,7 +2346,7 @@ function getFilteredEventsForExport() {
                     matchesUser = true;
                 }
             } else if (currentUserRole === 'USER') {
-                matchesUser = event.createdBy === currentUsername;
+                matchesUser = event.createdBy === currentUsername || event.assignedTo === currentUsername || event.visibility === 'public';
             } else {
                 matchesUser = event.visibility === 'public';
             }
@@ -2456,7 +2520,7 @@ function processRecurrences() {
     Object.keys(eventsData).forEach(fullKey => {
         const [year, month] = fullKey.split('-').map(Number);
         eventsData[fullKey].forEach(event => {
-            if (event.seriesId) {
+            if (event.seriesId && event.status !== 'deleted') {
                 if (!seriesMap[event.seriesId]) {
                     seriesMap[event.seriesId] = {
                         events: [],
@@ -2476,10 +2540,11 @@ function processRecurrences() {
 
     Object.keys(seriesMap).forEach(seriesId => {
         const series = seriesMap[seriesId];
+        if (series.events.length === 0) return; // Nenhuma tarefa ativa restante na série
         series.events.sort((a, b) => a.eventDate - b.eventDate);
         const lastInstance = series.events[series.events.length - 1];
 
-        const activeInstances = series.events.filter(e => !e.completed && e.eventDate >= today);
+        const activeInstances = series.events.filter(e => !e.completed && e.status === 'active' && e.eventDate >= today);
         const targetActiveCount = 3;
 
         if (activeInstances.length < targetActiveCount) {
@@ -2490,7 +2555,17 @@ function processRecurrences() {
             for (let i = 0; i < instancesToGenerate; i++) {
                 if (series.type === 'daily') currentDateObj.setDate(currentDateObj.getDate() + 1);
                 if (series.type === 'weekly') currentDateObj.setDate(currentDateObj.getDate() + 7);
-                if (series.type === 'monthly') currentDateObj.setMonth(currentDateObj.getMonth() + 1);
+                if (series.type === 'monthly') {
+                    const originalDay = currentDateObj.getDate();
+                    currentDateObj.setDate(1);
+                    currentDateObj.setMonth(currentDateObj.getMonth() + 1);
+                    const lastDay = new Date(
+                        currentDateObj.getFullYear(),
+                        currentDateObj.getMonth() + 1,
+                        0
+                    ).getDate();
+                    currentDateObj.setDate(Math.min(originalDay, lastDay));
+                }
 
                 if (endRecurrenceDateObj && currentDateObj > endRecurrenceDateObj) break;
 
@@ -2501,7 +2576,7 @@ function processRecurrences() {
 
                 const newEvent = {
                     ...series.template,
-                    id: Date.now() + Math.random().toString(36).substr(2, 9) + i,
+                    id: generateUUID(),
                     day: curDay,
                     completed: false,
                     version: 1
