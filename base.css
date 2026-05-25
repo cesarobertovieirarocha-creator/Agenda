@@ -1,0 +1,64 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap');
+
+:root {
+    /* Color Tokens - Dark (Default) */
+    --bg-main: #1a1a2e;
+    --bg-gradient: radial-gradient(circle at top left, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+    --bg-container: rgba(255, 255, 255, 0.03);
+    --bg-header: rgba(255, 255, 255, 0.05);
+    --bg-controls: rgba(0, 0, 0, 0.2);
+    --bg-cell: rgba(255, 255, 255, 0.02);
+    --bg-cell-hover: rgba(255, 255, 255, 0.08);
+    --bg-input: rgba(0, 0, 0, 0.5);
+    --bg-input-focus: rgba(0, 0, 0, 0.8);
+    --bg-modal: #1a1a2e;
+    --bg-legend: rgba(0, 0, 0, 0.2);
+    --bg-btn: rgba(255, 255, 255, 0.05);
+    --bg-login: radial-gradient(circle at top left, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+    --text-primary: #e0e0e0;
+    --text-heading: #fff;
+    --text-muted: #94a3b8;
+    --text-dim: #64748b;
+    --text-day: #f8fafc;
+    --border-color: rgba(255, 255, 255, 0.1);
+    --border-light: rgba(255, 255, 255, 0.05);
+    --border-input: rgba(255, 255, 255, 0.4);
+    --shadow-main: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+    --accent: #818cf8;
+    --accent-bg: #4f46e5;
+
+    /* Spacing Tokens */
+    --space-1: 8px;
+    --space-2: 16px;
+    --space-3: 24px;
+    --space-4: 32px;
+
+    /* Radius Tokens */
+    --radius-sm: 8px;
+    --radius-md: 12px;
+    --radius-lg: 20px;
+    --radius-xl: 30px;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Outfit', sans-serif;
+    background: var(--bg-gradient);
+    min-height: 100vh;
+    padding: 40px 20px;
+    color: var(--text-primary);
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    transition: background 0.4s ease, color 0.4s ease;
+}
+
+img {
+    max-width: 100%;
+    display: block;
+}
