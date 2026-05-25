@@ -1791,3 +1791,345 @@
             transform: rotate(360deg);
         }
     }
+
+    /* ========================================
+    LOGIN THEME BUTTON
+    ======================================== */
+    .login-theme-btn {
+        position: absolute;
+        top: 22px;
+        right: 22px;
+        width: 46px;
+        height: 46px;
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        border-radius: 13px;
+        cursor: pointer;
+        font-size: 20px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        backdrop-filter: blur(12px);
+        z-index: 10;
+        color: var(--text-primary);
+    }
+
+    .login-theme-btn:hover {
+        background: rgba(255, 255, 255, 0.16);
+        border-color: rgba(255, 255, 255, 0.25);
+        transform: scale(1.08) rotate(15deg);
+        box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
+    }
+
+    [data-theme="light"] .login-theme-btn {
+        background: rgba(0, 0, 0, 0.06);
+        border-color: rgba(0, 0, 0, 0.12);
+    }
+
+    [data-theme="light"] .login-theme-btn:hover {
+        background: rgba(0, 0, 0, 0.12);
+    }
+
+    /* ========================================
+    PREMIUM LOGIN BRAND VISUAL
+    ======================================== */
+    .login-brand-hero {
+        position: relative;
+        width: 120px;
+        height: 120px;
+        margin: 0 auto 24px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .login-hero-bg {
+        position: absolute;
+        inset: 0;
+        border-radius: 50%;
+        background: radial-gradient(circle, rgba(79, 70, 229, 0.3) 0%, rgba(124, 58, 237, 0.1) 50%, transparent 70%);
+        animation: heroPulse 3.5s ease-in-out infinite;
+    }
+
+    .login-hero-ring {
+        position: absolute;
+        border-radius: 50%;
+        border-style: solid;
+        border-color: transparent;
+    }
+
+    .ring-1 {
+        width: 96px;
+        height: 96px;
+        border-width: 1.5px;
+        border-color: rgba(129, 140, 248, 0.3) transparent rgba(129, 140, 248, 0.1) transparent;
+        animation: heroRingSpin 5s linear infinite;
+    }
+
+    .ring-2 {
+        width: 118px;
+        height: 118px;
+        border-width: 1px;
+        border-color: transparent rgba(124, 58, 237, 0.2) transparent rgba(124, 58, 237, 0.1);
+        animation: heroRingSpin 8s linear infinite reverse;
+    }
+
+    .login-hero-core {
+        position: relative;
+        width: 76px;
+        height: 76px;
+        background: linear-gradient(135deg, rgba(79, 70, 229, 0.18) 0%, rgba(124, 58, 237, 0.12) 100%);
+        border-radius: 22px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        backdrop-filter: blur(8px);
+        border: 1px solid rgba(129, 140, 248, 0.22);
+        box-shadow:
+            0 10px 36px rgba(79, 70, 229, 0.28),
+            inset 0 1px 0 rgba(255, 255, 255, 0.12);
+    }
+
+    @keyframes heroPulse {
+
+        0%,
+        100% {
+            transform: scale(1);
+            opacity: 0.7;
+        }
+
+        50% {
+            transform: scale(1.18);
+            opacity: 1;
+        }
+    }
+
+    @keyframes heroRingSpin {
+        from {
+            transform: rotate(0deg);
+        }
+
+        to {
+            transform: rotate(360deg);
+        }
+    }
+
+    /* ========================================
+    TASK COMPLETE CIRCLE BUTTON
+    ======================================== */
+    .task-complete-wrapper {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 10px;
+        padding: 12px 0 4px;
+        width: 100%;
+    }
+
+    .task-complete-circle {
+        width: 76px;
+        height: 76px;
+        border-radius: 50%;
+        border: 3px solid #10b981;
+        background: transparent;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        position: relative;
+    }
+
+    .task-complete-circle svg {
+        width: 36px;
+        height: 36px;
+        stroke: #10b981;
+        fill: none;
+        stroke-width: 3;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        opacity: 0.3;
+        transition: all 0.3s ease;
+    }
+
+    .task-complete-circle:hover {
+        background: rgba(16, 185, 129, 0.12);
+        transform: scale(1.1);
+        box-shadow: 0 0 28px rgba(16, 185, 129, 0.35);
+    }
+
+    .task-complete-circle:hover svg {
+        opacity: 1;
+    }
+
+    /* Estado: concluída (verde preenchido) */
+    .task-complete-circle.is-completed {
+        background: #10b981;
+        border-color: #10b981;
+        box-shadow: 0 8px 28px rgba(16, 185, 129, 0.45);
+        transform: scale(1.0);
+    }
+
+    .task-complete-circle.is-completed svg {
+        stroke: white;
+        opacity: 1;
+    }
+
+    .task-complete-circle.is-completed:hover {
+        background: #059669;
+        box-shadow: 0 10px 32px rgba(16, 185, 129, 0.55);
+        transform: scale(1.08);
+    }
+
+    /* Estado: reabrir (laranja preenchido) */
+    .task-complete-circle.is-reopening {
+        background: #f59e0b;
+        border-color: #f59e0b;
+        box-shadow: 0 8px 28px rgba(245, 158, 11, 0.45);
+    }
+
+    .task-complete-circle.is-reopening svg {
+        stroke: white;
+        opacity: 1;
+    }
+
+    .task-complete-circle.is-reopening:hover {
+        background: #d97706;
+        box-shadow: 0 10px 32px rgba(245, 158, 11, 0.55);
+        transform: scale(1.08);
+    }
+
+    .task-complete-label {
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.8px;
+        color: var(--text-muted);
+        transition: color 0.3s ease;
+        user-select: none;
+    }
+
+    .task-complete-wrapper:hover .task-complete-label {
+        color: #10b981;
+    }
+
+    .task-complete-wrapper:has(.is-reopening):hover .task-complete-label {
+        color: #f59e0b;
+    }
+
+    /* ========================================
+    PREMIUM RECURRENCE CANCEL BUTTON
+    ======================================== */
+    .recurrence-premium-container {
+        width: 100%;
+        margin-bottom: 20px;
+        padding: 16px;
+        border-radius: 16px;
+        background: linear-gradient(135deg, rgba(239, 68, 68, 0.08) 0%, rgba(220, 38, 38, 0.03) 100%);
+        border: 1px dashed rgba(239, 68, 68, 0.25);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 12px;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+        transition: all 0.3s ease;
+        box-sizing: border-box;
+    }
+
+    [data-theme="light"] .recurrence-premium-container {
+        background: linear-gradient(135deg, rgba(239, 68, 68, 0.05) 0%, rgba(220, 38, 38, 0.02) 100%);
+        border: 1px dashed rgba(239, 68, 68, 0.2);
+    }
+
+    .recurrence-premium-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 10px;
+        border-radius: 20px;
+        background: rgba(239, 68, 68, 0.12);
+        color: #f87171;
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.5px;
+        text-transform: uppercase;
+        border: 1px solid rgba(239, 68, 68, 0.15);
+    }
+
+    [data-theme="light"] .recurrence-premium-badge {
+        background: rgba(239, 68, 68, 0.08);
+        color: #ef4444;
+        border: 1px solid rgba(239, 68, 68, 0.1);
+    }
+
+    .btn-recurrence-premium {
+        width: 100%;
+        position: relative;
+        overflow: hidden;
+        padding: 14px 24px;
+        border-radius: 12px;
+        background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+        border: none;
+        color: white;
+        font-family: inherit;
+        font-size: 14px;
+        font-weight: 600;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        cursor: pointer;
+        box-shadow: 0 4px 15px rgba(239, 68, 68, 0.3);
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        box-sizing: border-box;
+    }
+
+    .btn-recurrence-premium::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: -100%;
+        width: 100%;
+        height: 100%;
+        background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+        transition: 0.5s;
+    }
+
+    .btn-recurrence-premium:hover::before {
+        left: 100%;
+    }
+
+    .btn-recurrence-premium:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 20px rgba(239, 68, 68, 0.45);
+        background: linear-gradient(135deg, #f87171 0%, #dc2626 100%);
+    }
+
+    .btn-recurrence-premium:active {
+        transform: translateY(0);
+        box-shadow: 0 3px 10px rgba(239, 68, 68, 0.3);
+    }
+
+    .btn-recurrence-premium svg {
+        width: 18px;
+        height: 18px;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 2.5;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        transition: transform 0.5s ease;
+    }
+
+    .btn-recurrence-premium:hover svg {
+        transform: rotate(180deg);
+    }
+
+    .recurrence-premium-text {
+        font-size: 11px;
+        color: var(--text-muted);
+        text-align: center;
+        line-height: 1.4;
+        margin-top: 2px;
+    }
